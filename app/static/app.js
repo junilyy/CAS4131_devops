@@ -26,7 +26,12 @@ let usageChart = null;
 function badgeClass(value) {
     const v = (value || "").toLowerCase();
 
-    // 여기에 구현하세요
+    if (["active", "online", "normal"].includes(v)) return "badge status-active";
+    if (["paused", "standby"].includes(v)) return "badge status-paused";
+    if (["expired", "error", "warning"].includes(v)) return "badge status-expired";
+    if (v === "offline") return "badge status-offline";
+    if (["on", "cleaning"].includes(v)) return "badge status-on";
+    if (v === "off") return "badge status-off";
     return "badge";
 }
 
@@ -42,7 +47,9 @@ function badgeClass(value) {
 //   const res = await fetch("/api/subscribers");
 //   subscribers = await res.json();
 async function fetchSubscribers() {
-    // 여기에 구현하세요
+    const res = await fetch("/api/subscribers");
+    subscribers = await res.json();
+    renderSubscribers();
 }
 
 // TODO [요구사항 #1-B]: subscribers 배열을 테이블에 렌더링하세요.
@@ -59,8 +66,31 @@ function renderSubscribers() {
     const search = document.getElementById("subscriber-search").value.toLowerCase();
     const statusFilter = document.getElementById("subscriber-status-filter").value;
 
-    // 여기에 구현하세요
+    const filtered = subscribers.filter((s) => {
+        const matchSearch =
+            !search ||
+            s.userId.toLowerCase().includes(search) ||
+            s.name.toLowerCase().includes(search) ||
+            s.plan.toLowerCase().includes(search) ||
+            s.status.toLowerCase().includes(search);
+        const matchStatus = !statusFilter || s.status === statusFilter;
+        return matchSearch && matchStatus;
+    });
+
     tbody.innerHTML = "";
+    filtered.forEach((s) => {
+        const tr = document.createElement("tr");
+        if (s.userId === selectedUserId) tr.classList.add("selected");
+        tr.innerHTML = `
+            <td>${s.userId}</td>
+            <td>${s.name}</td>
+            <td>${s.plan}</td>
+            <td><span class="${badgeClass(s.status)}">${s.status}</span></td>
+            <td>${s.deviceCount}</td>
+        `;
+        tr.addEventListener("click", () => selectSubscriber(s.userId));
+        tbody.appendChild(tr);
+    });
 }
 
 
@@ -77,7 +107,16 @@ function renderSubscribers() {
 //   4. GET /api/subscribers/{userId}/devices 를 호출
 //   5. currentDevices에 저장하고 renderDevices()를 호출
 async function selectSubscriber(userId) {
-    // 여기에 구현하세요
+    selectedUserId = userId;
+    selectedDeviceId = null;
+    renderSubscribers();
+
+    document.getElementById("usage-detail").classList.add("hidden");
+    document.getElementById("usage-empty").classList.remove("hidden");
+
+    const res = await fetch(`/api/subscribers/${userId}/devices`);
+    currentDevices = await res.json();
+    renderDevices();
 }
 
 // TODO [요구사항 #2-B]: currentDevices 배열을 테이블에 렌더링하세요.
@@ -97,8 +136,50 @@ function renderDevices() {
     const search = document.getElementById("device-search").value.toLowerCase();
     const statusFilter = document.getElementById("device-status-filter").value;
 
-    // 여기에 구현하세요
     tbody.innerHTML = "";
+
+    if (currentDevices.length === 0) {
+        emptyEl.textContent = "No registered devices.";
+        emptyEl.classList.remove("hidden");
+        tableEl.classList.add("hidden");
+        return;
+    }
+
+    const filtered = currentDevices.filter((d) => {
+        const matchSearch =
+            !search ||
+            d.deviceId.toLowerCase().includes(search) ||
+            d.type.toLowerCase().includes(search) ||
+            d.model.toLowerCase().includes(search) ||
+            d.location.toLowerCase().includes(search) ||
+            d.status.toLowerCase().includes(search);
+        const matchStatus = !statusFilter || d.status === statusFilter;
+        return matchSearch && matchStatus;
+    });
+
+    if (filtered.length === 0) {
+        emptyEl.textContent = "No devices matched your filter.";
+        emptyEl.classList.remove("hidden");
+        tableEl.classList.add("hidden");
+        return;
+    }
+
+    emptyEl.classList.add("hidden");
+    tableEl.classList.remove("hidden");
+
+    filtered.forEach((d) => {
+        const tr = document.createElement("tr");
+        if (d.deviceId === selectedDeviceId) tr.classList.add("selected");
+        tr.innerHTML = `
+            <td>${d.deviceId}</td>
+            <td>${d.type}</td>
+            <td>${d.model}</td>
+            <td>${d.location}</td>
+            <td><span class="${badgeClass(d.status)}">${d.status}</span></td>
+        `;
+        tr.addEventListener("click", () => selectDevice(d.deviceId));
+        tbody.appendChild(tr);
+    });
 }
 
 // TODO [요구사항 #2-C]: 가전 클릭 시 상세 사용 현황을 조회하세요.
@@ -113,7 +194,27 @@ function renderDevices() {
 //        Health Status(badge), Remark
 //   5. renderUsageChart(data.weeklyUsageTrend)를 호출
 async function selectDevice(deviceId) {
-    // 여기에 구현하세요
+    selectedDeviceId = deviceId;
+    renderDevices();
+
+    const res = await fetch(`/api/devices/${deviceId}/usage`);
+    const data = await res.json();
+
+    document.getElementById("usage-empty").classList.add("hidden");
+    document.getElementById("usage-detail").classList.remove("hidden");
+
+    document.getElementById("usage-info").innerHTML = `
+        <div class="detail-item"><span class="detail-label">Device ID</span><span>${data.deviceId}</span></div>
+        <div class="detail-item"><span class="detail-label">Device Name</span><span>${data.deviceName}</span></div>
+        <div class="detail-item"><span class="detail-label">Power Status</span><span class="${badgeClass(data.powerStatus)}">${data.powerStatus}</span></div>
+        <div class="detail-item"><span class="detail-label">Last Used</span><span>${data.lastUsedAt}</span></div>
+        <div class="detail-item"><span class="detail-label">Total Usage Hours</span><span>${data.totalUsageHours}h</span></div>
+        <div class="detail-item"><span class="detail-label">Weekly Usage Count</span><span>${data.weeklyUsageCount}</span></div>
+        <div class="detail-item"><span class="detail-label">Health Status</span><span class="${badgeClass(data.healthStatus)}">${data.healthStatus}</span></div>
+        <div class="detail-item"><span class="detail-label">Remark</span><span>${data.remark}</span></div>
+    `;
+
+    renderUsageChart(data.weeklyUsageTrend);
 }
 
 // TODO [요구사항 #2-D]: Chart.js를 사용하여 주간 사용량 Bar Chart를 그리세요.
@@ -134,7 +235,25 @@ function renderUsageChart(trend) {
         usageChart.destroy();
     }
 
-    // 여기에 구현하세요
+    usageChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+            labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            datasets: [{
+                label: "Usage Count",
+                data: trend,
+                backgroundColor: "rgba(99, 102, 241, 0.6)",
+                borderColor: "rgba(99, 102, 241, 1)",
+                borderWidth: 1,
+            }],
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: { beginAtZero: true },
+            },
+        },
+    });
 }
 
 
@@ -142,16 +261,13 @@ function renderUsageChart(trend) {
 // 이벤트 바인딩 + 초기화
 // =============================================================================
 function bindEvents() {
-    // [요구사항 #1] 완료 후 아래 주석을 해제하세요
-    // document.getElementById("subscriber-search").addEventListener("input", renderSubscribers);
-    // document.getElementById("subscriber-status-filter").addEventListener("change", renderSubscribers);
+    document.getElementById("subscriber-search").addEventListener("input", renderSubscribers);
+    document.getElementById("subscriber-status-filter").addEventListener("change", renderSubscribers);
 
-    // [요구사항 #2] 완료 후 아래 주석을 해제하세요
-    // document.getElementById("device-search").addEventListener("input", renderDevices);
-    // document.getElementById("device-status-filter").addEventListener("change", renderDevices);
+    document.getElementById("device-search").addEventListener("input", renderDevices);
+    document.getElementById("device-status-filter").addEventListener("change", renderDevices);
 }
 
 bindEvents();
 
-// [요구사항 #1] 완료 후 아래 주석을 해제하세요
-// fetchSubscribers();
+fetchSubscribers();
